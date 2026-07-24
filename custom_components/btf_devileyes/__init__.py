@@ -6,13 +6,9 @@ import asyncio
 import logging
 
 from bleak import BleakClient, BleakError
-from bleak.backends.device import BLEDevice
-from home_assistant_bluetooth import BluetoothServiceInfoBleak
 
 from homeassistant.components.bluetooth import (
     async_ble_device_from_address,
-    async_discovered_service_info,
-    async_register_scanner,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, EVENT_HOMEASSISTANT_STOP
@@ -26,12 +22,14 @@ from .const import (
     DEVICE_MODEL,
     DOMAIN,
     MANUFACTURER,
-    SERVICE_UUID,
 )
 
 PLATFORMS = ["light", "select"]
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_DELAY = 3.0
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -76,6 +74,7 @@ class BtfDevilEyesDevice:
         self._client: BleakClient | None = None
         self._lock = asyncio.Lock()
         self._notify_callback = None
+        self._reconnect_task: asyncio.Task | None = None
         self._device_info = DeviceInfo(
             identifiers={(DOMAIN, address)},
             name="BTF Devil Eyes",
@@ -89,51 +88,98 @@ class BtfDevilEyesDevice:
     def device_info(self) -> DeviceInfo:
         return self._device_info
 
-    async def _ensure_connected(self) -> BleakClient:
-        """Connect (or return existing connection)."""
+    async def _ensure_connected(self) -> BleakClient | None:
+        """Connect (or return existing connection) with auto-retry."""
         if self._client and self._client.is_connected:
             return self._client
 
-        ble_device = async_ble_device_from_address(self.hass, self.address)
-        if not ble_device:
-            raise BleakError(f"Device {self.address} not available")
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                ble_device = async_ble_device_from_address(
+                    self.hass, self.address
+                )
+                if not ble_device:
+                    _LOGGER.warning(
+                        "Device %s not found (attempt %d/%d)",
+                        self.address, attempt, MAX_RETRIES,
+                    )
+                    await asyncio.sleep(RETRY_DELAY)
+                    continue
 
-        self._client = BleakClient(
-            ble_device,
-            timeout=CONNECT_TIMEOUT,
+                self._client = BleakClient(
+                    ble_device,
+                    timeout=CONNECT_TIMEOUT,
+                )
+                await self._client.connect()
+
+                if self._notify_callback:
+                    await self._client.start_notify(
+                        CHARACTERISTIC_UUID, self._notify_callback
+                    )
+
+                _LOGGER.info("Connected to %s", self.address)
+                return self._client
+
+            except BleakError as err:
+                _LOGGER.warning(
+                    "BLE connect failed (attempt %d/%d): %s",
+                    attempt, MAX_RETRIES, err,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY)
+
+        _LOGGER.error(
+            "Could not connect to %s after %d attempts",
+            self.address, MAX_RETRIES,
         )
-        await self._client.connect()
-
-        if self._notify_callback:
-            await self._client.start_notify(
-                CHARACTERISTIC_UUID, self._notify_callback
-            )
-
-        return self._client
+        return None
 
     async def disconnect(self) -> None:
         """Disconnect from the device."""
         async with self._lock:
-            if self._client and self._client.is_connected:
-                try:
-                    await self._client.stop_notify(CHARACTERISTIC_UUID)
-                except Exception:
-                    pass
-                await self._client.disconnect()
-            self._client = None
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+                self._reconnect_task = None
+            await self._close_client()
 
-    async def async_write(self, data: bytes) -> None:
-        """Write command to the device (Write Without Response)."""
+    async def _close_client(self) -> None:
+        """Close the current client connection."""
+        if self._client and self._client.is_connected:
+            try:
+                await self._client.stop_notify(CHARACTERISTIC_UUID)
+            except Exception:
+                pass
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+        self._client = None
+
+    async def async_write(self, data: bytes) -> bool:
+        """Write command to the device (Write Without Response).
+        Returns True on success, False on failure.
+        """
         async with self._lock:
             try:
                 client = await self._ensure_connected()
+                if not client:
+                    _LOGGER.error(
+                        "Cannot write %s — not connected",
+                        data.hex(),
+                    )
+                    return False
+
                 await client.write_gatt_char(
                     CHARACTERISTIC_UUID, data, response=False
                 )
                 _LOGGER.debug("Wrote: %s", data.hex())
+                return True
+
             except BleakError as err:
                 _LOGGER.error("BLE write failed: %s", err)
-                raise
+                # Reset client state so next write retries connect
+                await self._close_client()
+                return False
 
     def set_notify_callback(self, callback) -> None:
         """Set notification callback."""
