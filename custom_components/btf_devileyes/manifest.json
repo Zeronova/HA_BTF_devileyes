@@ -1,0 +1,12 @@
+{
+  "domain": "btf_devileyes",
+  "name": "BTF Lighting Devil Eyes",
+  "codeowners": ["@zeronova"],
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "documentation": "https://github.com/Zeronova/HA_BTF_devileyes",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}

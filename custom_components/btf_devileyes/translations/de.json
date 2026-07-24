@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BTF Lighting Devil Eyes",
+        "description": "Wähle dein BTF-Lighting-Panel aus der Liste, oder gib die MAC-Adresse manuell ein.",
+        "data": {
+          "address": "Gerät"
+        }
+      },
+      "manual": {
+        "title": "Manuelle Eingabe",
+        "description": "Gib die MAC-Adresse deines Devil-Eyes-Panels ein.",
+        "data": {
+          "address": "MAC-Adresse"
+        },
+        "errors": {
+          "invalid_mac": "Ungültige MAC-Adresse (Format: AA:BB:CC:DD:EE:FF)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "flip_mode": {
+        "state": {
+          "none": "Kein Flip",
+          "xy": "XY Flip",
+          "x": "X Flip",
+          "y": "Y Flip"
+        }
+      }
+    },
+    "light": {
+      "light": {
+        "name": "Devil Eyes"
+      }
+    }
+  }
+}
