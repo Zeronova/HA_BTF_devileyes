@@ -64,6 +64,7 @@ class BtfDevilEyesFlipSelect(SelectEntity):
             return
 
         cmd = FLIP_COMMANDS[option]
-        await self._device.async_write(cmd)
-        self._attr_current_option = option
-        self.async_write_ha_state()
+        success = await self._device.async_write(cmd)
+        if success:
+            self._attr_current_option = option
+            self.async_write_ha_state()

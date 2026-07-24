@@ -56,21 +56,24 @@ class BtfDevilEyesLight(LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
+        success = False
         if ATTR_BRIGHTNESS in kwargs:
             brightness = kwargs[ATTR_BRIGHTNESS]
-            # HA brightness is 0-255, device expects same range
             cmd = bytearray(CMD_BRIGHTNESS_TEMPLATE)
             cmd[5] = brightness
-            await self._device.async_write(bytes(cmd))
-            self._attr_brightness = brightness
+            success = await self._device.async_write(bytes(cmd))
+            if success:
+                self._attr_brightness = brightness
         else:
-            await self._device.async_write(CMD_ON)
+            success = await self._device.async_write(CMD_ON)
 
-        self._attr_is_on = True
-        self.async_write_ha_state()
+        if success:
+            self._attr_is_on = True
+            self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        await self._device.async_write(CMD_OFF)
-        self._attr_is_on = False
-        self.async_write_ha_state()
+        success = await self._device.async_write(CMD_OFF)
+        if success:
+            self._attr_is_on = False
+            self.async_write_ha_state()
